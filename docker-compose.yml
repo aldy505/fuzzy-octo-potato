@@ -1,0 +1,237 @@
+x-default-vars:
+  &default-vars
+  DATABASE_URL: postgres://postgres:postgres@db:5432/postgres?sslmode=disable
+  AMQP_URL: amqp://guest:guest@rabbitmq:5672/
+
+services:
+  db:
+    image: postgres:14.3-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    healthcheck:
+      test: pg_isready -U postgres
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  db_exporter:
+    build: ./exporters/postgresql
+    environment:
+      DATA_SOURCE_NAME: postgresql://postgres:postgres@db:5432/postgres?sslmode=disable
+
+  rabbitmq:
+    image: rabbitmq:3.10.5-management
+    ports:
+      - 15672:15672
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    volumes:
+      - ./configuration/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins
+
+  prometheus:
+    image: prom/prometheus:v2.36.1
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+      resources:
+        limits:
+          cpus: '1'
+          memory: 250M
+        reservations:
+          cpus: '1'
+          memory: 50M
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+        window: 30s
+    container_name: prometheus
+    ports:
+      - 9090:9090
+    healthcheck:
+      test: "wget -O - -T 5 -S http://prometheus:9090/api/v1/status/runtimeinfo"
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 5
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - ./configuration/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+
+  grafana:
+    image: grafana/grafana:8.5.5
+    user: '472'
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+        window: 30s
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+      resources:
+        limits:
+          cpus: '1'
+          memory: 250M
+        reservations:
+          cpus: '1'
+          memory: 50M
+    environment:
+      GF_INSTALL_PLUGINS: 'grafana-clock-panel,grafana-simple-json-datasource'
+    healthcheck:
+      test: "wget -O - -T 5 -S http://grafana:3000/api/health"
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 5
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - ./configuration/grafana/provisioning/:/etc/grafana/provisioning/
+    env_file:
+      - ./configuration/grafana/config.monitoring
+    ports:
+      - 3000:3000
+    depends_on:
+      prometheus:
+        condition: service_healthy
+
+  api_gateway:
+    image: traefik:v2.6.2
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--log.level=WARN"
+      - "--metrics.prometheus=true"
+      - "--metrics.prometheus.addrouterslabels=true"
+      - "--entryPoints.metrics.address=:8082"
+      - "--metrics.prometheus.entryPoint=metrics"
+      - "--ping=true"
+    environment:
+      - TZ=UTC
+    ports:
+      # The HTTP port
+      - "80:80"
+      # The Web UI (enabled by --api.insecure=true)
+      - "8080:8080"
+    volumes:
+      # So that Traefik can listen to the Docker events
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: traefik healthcheck --ping
+      interval: 10s
+      timeout: 30s
+      retries: 5
+
+  alderstool:
+    build: ./alderstool
+    environment:
+      <<: *default-vars
+      PORT: 8080
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.aldestool.loadbalancer.server.port=8080"
+      - "traefik.http.services.aldestool.loadbalancer.server.scheme=http"
+      - "traefik.http.services.aldestool.loadbalancer.healthcheck.interval=30s"
+      - "traefik.http.services.aldestool.loadbalancer.healthcheck.path=/healthz"
+    healthcheck:
+      test: curl -f http://localhost:8080/healthz || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    deploy:
+      mode: replicated # global, replicated
+      replicas: 5
+      restart_policy:
+        condition: on-failure
+        delay: 30s
+        max_attempts: 10
+        window: 120s
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  cobbleday:
+    build: ./cobbleday
+    environment:
+      <<: *default-vars
+      PORT: 8080
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.cobbleday.entrypoints=web"
+      - "traefik.http.routers.cobbleday.rule=PathPrefix(`/`)"
+      - "traefik.http.services.cobbleday.loadbalancer.server.port=8080"
+      - "traefik.http.services.cobbleday.loadbalancer.server.scheme=http"
+      - "traefik.http.services.cobbleday.loadbalancer.healthcheck.interval=30s"
+      - "traefik.http.services.cobbleday.loadbalancer.healthcheck.path=/healthz"
+    healthcheck:
+      test: curl -f http://localhost:8080/healthz || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    deploy:
+      mode: replicated # global, replicated
+      replicas: 3
+      restart_policy:
+        condition: on-failure
+        delay: 30s
+        max_attempts: 10
+        window: 120s
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  paralipteron:
+    build: ./paralipteron
+    environment:
+      <<: *default-vars
+      COBBLEDAY_URL: http://cobbleday:8080
+    labels:
+      - "traefik.enable=true"
+    deploy:
+      mode: replicated # global, replicated
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+        delay: 30s
+        max_attempts: 10
+        window: 120s
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+networks:
+  app_subnet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24

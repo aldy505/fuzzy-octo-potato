@@ -1,0 +1,31 @@
+global:
+  scrape_interval: 5s # By default, scrape targets every 15 seconds.
+
+  # Attach these labels to any time series or alerts when communicating with
+  # external systems (federation, remote storage, Alertmanager).
+
+  evaluation_interval: 30s
+  scrape_timeout: 3s
+
+# A scrape configuration containing exactly one endpoint to scrape:
+# Here it's Prometheus itself.
+scrape_configs:
+  - job_name: "PostgreSQL"
+    static_configs:
+      - targets:
+          - db_exporter:9187
+
+  - job_name: "RabbitMQ"
+    static_configs:
+      - targets:
+          - rabbitmq:15692
+
+  - job_name: "Traefik"
+    static_configs:
+      - targets:
+          - api_gateway:8082
+
+  - job_name: "Cobbleday"
+    static_configs:
+      - targets:
+          - cobbleday:8080
