@@ -217,7 +217,7 @@ services:
       - "traefik.enable=true"
     deploy:
       mode: replicated # global, replicated
-      replicas: 2
+      replicas: 3
       restart_policy:
         condition: on-failure
         delay: 30s
@@ -226,6 +226,24 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  squawbar:
+    build: ./squawbar
+    environment:
+      <<: *default-vars
+    labels:
+      - "traefik.enable=true"
+    deploy:
+      mode: replicated
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+        delay: 30s
+        max_attempts: 10
+        window: 120s
+    depends_on:
       rabbitmq:
         condition: service_healthy
 

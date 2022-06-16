@@ -100,8 +100,3 @@ func main() {
 
 	r.Run(":" + port)
 }
-
-type Message struct {
-	From    string `json:"from"`
-	Message string `json:"message"`
-}

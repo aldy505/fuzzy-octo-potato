@@ -7,20 +7,15 @@ import (
 	"github.com/streadway/amqp"
 )
 
-type Message struct {
-	From    string `json:"from"`
-	Message string `json:"message"`
-}
-
-type Alderstool struct {
+type Wrong struct {
 	msgs  chan Message
 	queue *amqp.Connection
 }
 
-func NewAlderstool(queue *amqp.Connection) *Alderstool {
+func NewWrong(queue *amqp.Connection) *Wrong {
 	msgsChan := make(chan Message)
 
-	a := &Alderstool{queue: queue, msgs: msgsChan}
+	a := &Wrong{queue: queue, msgs: msgsChan}
 	go func() {
 		err := a.publisher()
 		if err != nil {
@@ -31,7 +26,7 @@ func NewAlderstool(queue *amqp.Connection) *Alderstool {
 	return a
 }
 
-func (a *Alderstool) publisher() error {
+func (a *Wrong) publisher() error {
 	ch, err := a.queue.Channel()
 	if err != nil {
 		return err
@@ -39,12 +34,12 @@ func (a *Alderstool) publisher() error {
 	defer ch.Close()
 
 	q, err := ch.QueueDeclare(
-		"alderstool", // name
-		true,         // durable
-		false,        // delete when unused
-		false,        // exclusive
-		false,        // no-wait
-		nil,          // arguments
+		"wrong", // name
+		false,   // durable
+		false,   // delete when unused
+		false,   // exclusive
+		false,   // no-wait
+		nil,     // arguments
 	)
 	if err != nil {
 		return err
@@ -77,6 +72,6 @@ func (a *Alderstool) publisher() error {
 	return nil
 }
 
-func (a *Alderstool) Submit(msg Message) {
+func (a *Wrong) Submit(msg Message) {
 	a.msgs <- msg
 }
